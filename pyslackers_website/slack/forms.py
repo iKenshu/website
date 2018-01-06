@@ -1,19 +1,11 @@
-import logging
 from django import forms
 
-from pyslackers_website.marketing.models import BurnerDomain
-
-logger = logging.getLogger('pyslackers.slack.forms')
+from .validators import validate_is_not_burner_domain
 
 
 class SlackInviteForm(forms.Form):
     """Form for slack invitation requests"""
-    email = forms.EmailField()
+    email = forms.EmailField(validators=[
+        validate_is_not_burner_domain,
+    ])
     accept_tos = forms.BooleanField()
-
-    def clean_email(self):
-        email = self.cleaned_data['email']
-        if BurnerDomain.is_burner(email):
-            raise forms.ValidationError('Email is from a suspected burner '
-                                        'domain')
-        return email
