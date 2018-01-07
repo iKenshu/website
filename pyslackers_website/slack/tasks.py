@@ -45,7 +45,7 @@ def capture_snapshot_of_user_count() -> None:
     member_count = deleted_count = bot_count = 0
     time_zones = Counter()
 
-    for member in slack.members():
+    for member in slack.members(limit=999):
         if member.get('is_bot'):
             bot_count += 1
         elif member.get('deleted'):

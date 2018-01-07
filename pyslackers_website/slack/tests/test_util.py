@@ -1,3 +1,5 @@
+from types import GeneratorType
+
 import pook
 import pytest
 from requests.exceptions import HTTPError
@@ -31,21 +33,32 @@ class TestSlackClient:
     @pook.get('https://slack.com/api/users.list', reply=400)
     def test_members_raises_on_bad_response(self, slack_client: SlackClient):
         with pytest.raises(HTTPError):
-            slack_client.members()
+            next(slack_client.members())
         assert pook.isdone()
 
     @pook.get('https://slack.com/api/users.list', reply=200,
               response_json=dict(ok=False, error='something'))
     def test_members_raises_on_not_ok(self, slack_client: SlackClient):
         with pytest.raises(SlackException):
-            slack_client.members()
+            next(slack_client.members())
         assert pook.isdone()
 
     @pook.get('https://slack.com/api/users.list', reply=200,
               response_json=dict(ok=True, members=[]))
     def test_members_list_on_ok(self, slack_client: SlackClient):
-        assert isinstance(slack_client.members(), list)
+        gen = slack_client.members()
+        assert isinstance(gen, GeneratorType)
+        assert list(gen) == []
         assert pook.isdone()
+
+    @pook.get('https://slack.com/api/users.list', reply=200,
+              response_json=dict(ok=True, members=['foo'],
+                                 response_metadata=dict(next_cursor='abc')))
+    @pook.get('https://slack.com/api/users.list', reply=200,
+              response_json=dict(ok=True, members=['bar'],
+                                 response_metadata=dict(next_cursor='')))
+    def test_members_list_paginated(self, slack_client: SlackClient):
+        assert list(slack_client.members(limit=1)) == ['foo', 'bar']
 
     @pook.get('https://slack.com/api/channels.list', reply=400)
     def test_channels_raises_on_bad_response(self, slack_client: SlackClient):

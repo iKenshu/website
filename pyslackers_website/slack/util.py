@@ -1,8 +1,9 @@
 import enum
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 
 import requests
+import time
 
 logger = logging.getLogger('pyslackers.config.util')
 
@@ -49,19 +50,45 @@ class SlackClient:
             raise SlackException(body['error'])
         return body['ok']
 
-    def members(self) -> List[Dict[str, Any]]:
+    def members(self, *, limit: int = 200) -> Iterable[Dict[str, Any]]:
+        """
+        Retrieve all the members of the slack team the token is for.
+
+        :param limit: Number of members to return per pagination call.
+                      Per slack this can be <1000 (but may be limited
+                      in the future).
+        :return: Generator of members, automatically paged.
+        """
         logger.info('Retrieving user list from slack')
-        r = self._session.get(_SlackMethod.USER_LIST.url,
-                              params={
-                                  'token': self._token,
-                                  'presence': True
-                              })
-        r.raise_for_status()
-        body = r.json()
-        if not body['ok']:
-            logger.error('Unable to retrieve slack user list: %s', body)
-            raise SlackException(body['error'])
-        return body['members']
+
+        params = {
+            'token': self._token,
+            'presence': True,
+            'include_locale': True,
+            'limit': limit,
+        }
+        while True:
+            r = self._session.get(_SlackMethod.USER_LIST.url, params=params)
+            if r.status_code == 429:
+                retry_delay = int(r.headers['Retry-After']) + 1
+                logger.info('Received rate limit alert (%s), sleeping %ss',
+                            r.json(), retry_delay)
+                logger.debug('Rate limit headers: %s', r.headers)
+                time.sleep(retry_delay)
+                continue
+            r.raise_for_status()
+            body = r.json()
+            if not body['ok']:
+                logger.error('An unexpected error with the slack users.list '
+                             'method occurred: %s', body['error'])
+                raise SlackException(body['error'])
+            yield from body['members']
+
+            cursor = body.get('response_metadata', {}).get('next_cursor', '')
+            if not (body['members'] or cursor):
+                break
+            time.sleep(1.1)
+            params['cursor'] = cursor
 
     def channels(self, *, exclude_archived: bool = True,
                  exclude_members: bool = True):
